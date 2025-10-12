@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Desenho com Gestos (Câmera + MediaPipe)</title>
+<style>
+:root {
+  --ui-bg: #0f1115;
+  --ui-fg: #e8eef9;
+  --ui-sub: #9fb0c7;
+  --ok: #22c55e;
+}
+body {
+  margin: 0; background: var(--ui-bg); color: var(--ui-fg);
+  font-family: sans-serif; display: flex; flex-direction: column; align-items: center;
+}
+.app {
+  position: relative; border-radius: 14px; overflow: hidden; background: #000;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4);
+}
+video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#video { transform: scaleX(-1); object-fit: cover; }
+#draw, #overlay { pointer-events: none; }
+.legend {
+  position: absolute; top: 8px; left: 8px; font-size: 12px;
+  background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 6px;
+}
+.status { margin-top: 4px; font-size: 12px; color: var(--ok); }
+.controls {
+  margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+select {
+  padding: 4px 8px; border-radius: 4px; border: 1px solid #444; background: #1a1d25; color: #fff;
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="app" style="width: 960px; aspect-ratio: 16/9;">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="draw"></canvas>
+  <canvas id="overlay"></canvas>
+  <div class="legend">
+    Gestos: Pinça para desenhar, 3 dedos juntos para apagar
+    <div id="status" class="status">Iniciando…</div>
+  </div>
+</div>
+
+<div class="controls">
+  <label for="resSelect">Resolução:</label>
+  <select id="resSelect">
+    <option value="640x480">640×480</option>
+    <option value="800x600">800×600</option>
+    <option value="1280x720" selected>1280×720</option>
+    <option value="1920x1080">1920×1080</option>
+  </select>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script>
+(() => {
+  const video   = document.getElementById('video');
+  const drawCv  = document.getElementById('draw');
+  const ovCv    = document.getElementById('overlay');
+  const statusEl= document.getElementById('status');
+  const resSel  = document.getElementById('resSelect');
+
+  const dCtx = drawCv.getContext('2d');
+  const oCtx = ovCv.getContext('2d');
+
+  let color = '#7aa2ff';
+  let lineWidth = 6;
+  let lastPt = null;
+  let drawing = false;
+  let cam;
+
+  function resizeCanvas(w,h) {
+    const appDiv = document.getElementById('app');
+    appDiv.style.width = w + "px";
+    appDiv.style.height = h + "px";
+
+    [drawCv, ovCv].forEach(cv => {
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').setTransform(1,0,0,1,0,0);
+    });
+  }
+
+  resSel.addEventListener('change', () => {
+    const [w,h] = resSel.value.split('x').map(Number);
+    resizeCanvas(w,h);
+    if (cam) cam.stop();
+    startCamera(w,h);
+  });
+
+  function setStatus(t) { statusEl.textContent = t; }
+
+  const L = { WRIST:0, THUMB_TIP:4, INDEX_TIP:8, MIDDLE_TIP:12, RING_TIP:16 };
+
+  function dist(a,b) {
+    const dx = a.x - b.x, dy = a.y - b.y;
+    return Math.hypot(dx,dy);
+  }
+
+  function n2px(pt) {
+    // Novo ajuste com centralização e aumento de campo
+    const scaleX = 1.4;
+    const scaleY = 1.4;
+    const centerOffsetX = -drawCv.width * 0.15;
+    const centerOffsetY = 0;
+
+    let x = (1 - pt.x) * drawCv.width;
+    let y = pt.y * drawCv.height;
+
+    x = (x - drawCv.width/2) * scaleX + drawCv.width/2 + centerOffsetX;
+    y = (y - drawCv.height/2) * scaleY + drawCv.height/2 + centerOffsetY;
+
+    return { x, y };
+  }
+
+  function drawSegment(p0, p1) {
+    dCtx.strokeStyle = color;
+    dCtx.lineWidth = lineWidth;
+    dCtx.lineCap = 'round';
+    dCtx.lineJoin = 'round';
+    dCtx.beginPath();
+    dCtx.moveTo(p0.x, p0.y);
+    dCtx.lineTo(p1.x, p1.y);
+    dCtx.stroke();
+  }
+
+  function eraseCircle(center, radius=28) {
+    dCtx.save();
+    dCtx.globalCompositeOperation = 'destination-out';
+    dCtx.beginPath();
+    dCtx.arc(center.x, center.y, radius, 0, Math.PI*2);
+    dCtx.fill();
+    dCtx.restore();
+  }
+
+  function drawOverlay(handsLM) {
+    oCtx.clearRect(0,0,ovCv.width, ovCv.height);
+    if (!handsLM) return;
+    for (const lm of handsLM) {
+      const tips = [L.THUMB_TIP, L.INDEX_TIP, L.MIDDLE_TIP, L.RING_TIP];
+      tips.forEach(i => {
+        const p = n2px(lm[i]);
+        oCtx.fillStyle = 'rgba(122,162,255,0.9)';
+        oCtx.beginPath(); oCtx.arc(p.x, p.y, 4, 0, Math.PI*2); oCtx.fill();
+      });
+    }
+  }
+
+  function processLandmarks(landmarks) {
+    if (!landmarks || !landmarks.length) { setStatus('Mão não detectada'); lastPt=null; drawing=false; return; }
+    setStatus('Pronto');
+
+    const lm = landmarks[0];
+    const thumb = lm[L.THUMB_TIP];
+    const index = lm[L.INDEX_TIP];
+    const middle = lm[L.MIDDLE_TIP];
+    const ring = lm[L.RING_TIP];
+
+    const pinchD = dist(thumb, index);
+    const threeAB = dist(index, middle);
+    const threeBC = dist(middle, ring);
+    const threeAC = dist(index, ring);
+
+    const handScale = Math.max(dist(lm[L.WRIST], middle), dist(lm[L.WRIST], index));
+    const pinchThreshold = Math.max(0.05, handScale * 0.30);
+    const tripleThreshold = Math.max(0.06, handScale * 0.34);
+
+    const isPinch = pinchD < pinchThreshold;
+    const isTriple = (threeAB < tripleThreshold) && (threeBC < tripleThreshold) && (threeAC < tripleThreshold);
+
+    const pIndexPx = n2px(index);
+
+    if (isTriple) {
+      eraseCircle(pIndexPx, 30 + lineWidth * 1.2);
+      lastPt = null;
+      drawing = false;
+    } else if (isPinch) {
+      if (!drawing) {
+        drawing = true;
+        lastPt = pIndexPx;
+      } else {
+        const dx = pIndexPx.x - lastPt.x;
+        const dy = pIndexPx.y - lastPt.y;
+        if (Math.hypot(dx, dy) <= 80) {
+          drawSegment(lastPt, pIndexPx);
+        }
+        lastPt = pIndexPx;
+      }
+    } else {
+      drawing = false;
+      lastPt = null;
+    }
+  }
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+  hands.onResults(r => { drawOverlay(r.multiHandLandmarks); processLandmarks(r.multiHandLandmarks); });
+
+  async function startCamera(w,h) {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: w, height: h, facingMode: 'user' }, audio: false });
+    video.srcObject = stream;
+    cam = new Camera(video, { onFrame: async () => { await hands.send({ image: video }); }, width: w, height: h });
+    cam.start();
+  }
+
+  // inicial
+  const [initW, initH] = resSel.value.split('x').map(Number);
+  resizeCanvas(initW, initH);
+  startCamera(initW, initH);
+})();
+</script>
+</body>
+</html>

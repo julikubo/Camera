@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Detecção de Face</title>
+<style>
+body {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #222;
+  color: white;
+  font-family: sans-serif;
+  height: 100vh;
+  flex-direction: column;
+  transition: background 0.3s;
+}
+video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* espelha */
+  z-index: -1;
+}
+#msg {
+  padding: 10px 20px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 8px;
+  font-size: 1.5em;
+}
+</style>
+</head>
+<body>
+<video id="video" autoplay muted playsinline></video>
+<div id="msg">Aguardando rosto…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script>
+const video = document.getElementById('video');
+const msg = document.getElementById('msg');
+let cam;
+
+function onFaceDetected(hasFace) {
+  if (hasFace) {
+    document.body.style.background = "#0a6";
+    msg.textContent = "Face detectada!";
+    // Aqui você coloca qualquer ação: tocar som, iniciar função, enviar dados...
+  } else {
+    document.body.style.background = "#222";
+    msg.textContent = "Aguardando rosto…";
+  }
+}
+
+const faceDetection = new FaceDetection({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+});
+faceDetection.setOptions({
+  model: 'short',
+  minDetectionConfidence: 0.5
+});
+faceDetection.onResults(results => {
+  onFaceDetected(results.detections && results.detections.length > 0);
+});
+
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 480, facingMode: "user" }
+  });
+  video.srcObject = stream;
+
+  cam = new Camera(video, {
+    onFrame: async () => {
+      await faceDetection.send({ image: video });
+    },
+    width: 640,
+    height: 480
+  });
+  cam.start();
+}
+
+startCamera();
+</script>
+</body>
+</html>
