@@ -1,89 +1,198 @@
 <!doctype html>
 <html lang="pt-br">
+
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Detecção de Face</title>
-<style>
-body {
-  margin: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: #222;
-  color: white;
-  font-family: sans-serif;
-  height: 100vh;
-  flex-direction: column;
-  transition: background 0.3s;
-}
-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1); /* espelha */
-  z-index: -1;
-}
-#msg {
-  padding: 10px 20px;
-  background: rgba(0,0,0,0.5);
-  border-radius: 8px;
-  font-size: 1.5em;
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Detecção de Face</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #222;
+      color: white;
+      font-family: sans-serif;
+      height: 100vh;
+      flex-direction: column;
+      transition: background 0.3s;
+    }
+
+    video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      /* espelha */
+      z-index: -1;
+    }
+
+    #msg {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px 20px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 8px;
+      font-size: 1em;
+      text-align: left;
+      z-index: 10;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
 </head>
+
 <body>
-<video id="video" autoplay muted playsinline></video>
-<div id="msg">Aguardando rosto…</div>
+  <video id="video" autoplay muted playsinline></video>
+  <div id="msg">Carregando modelos…</div>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script>
-const video = document.getElementById('video');
-const msg = document.getElementById('msg');
-let cam;
+  <!-- Import face-api.js -->
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
-function onFaceDetected(hasFace) {
-  if (hasFace) {
-    document.body.style.background = "#0a6";
-    msg.textContent = "Face detectada!";
-    // Aqui você coloca qualquer ação: tocar som, iniciar função, enviar dados...
-  } else {
-    document.body.style.background = "#222";
-    msg.textContent = "Aguardando rosto…";
-  }
-}
+  <script>
+    const video = document.getElementById('video');
+    const msg = document.getElementById('msg');
+    let labeledFaceDescriptors = [];
 
-const faceDetection = new FaceDetection({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
-});
-faceDetection.setOptions({
-  model: 'short',
-  minDetectionConfidence: 0.5
-});
-faceDetection.onResults(results => {
-  onFaceDetected(results.detections && results.detections.length > 0);
-});
+    // Load models and start camera
+    Promise.all([
+      faceapi.nets.ssdMobilenetv1.loadFromUri('/proj/cam/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/proj/cam/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/proj/cam/models')
+    ]).then(startCamera).catch(err => {
+      console.error(err);
+      msg.textContent = "Erro ao carregar modelos: " + err;
+    });
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: 640, height: 480, facingMode: "user" }
-  });
-  video.srcObject = stream;
+    async function startCamera() {
+      msg.textContent = "Iniciando câmera…";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: "user" }
+        });
+        video.srcObject = stream;
+        await loadLabeledImages();
+      } catch (err) {
+        console.error(err);
+        msg.textContent = "Erro na câmera: " + err;
+      }
+    }
 
-  cam = new Camera(video, {
-    onFrame: async () => {
-      await faceDetection.send({ image: video });
-    },
-    width: 640,
-    height: 480
-  });
-  cam.start();
-}
+    async function loadLabeledImages() {
+      msg.textContent = "Carregando fotos…";
+      try {
+        const response = await fetch('list_faces.php');
+        const imageFiles = await response.json();
 
-startCamera();
-</script>
+        if (imageFiles.length === 0) {
+          msg.textContent = "Nenhuma foto encontrada em /labeled_images";
+          startRecognition(); // Start anyway, just won't recognize anyone
+          return;
+        }
+
+        labeledFaceDescriptors = await Promise.all(
+          imageFiles.map(async file => {
+            const label = file.split('.')[0]; // Remove extension
+            const imgUrl = `labeled_images/${file}`;
+            const img = await faceapi.fetchImage(imgUrl);
+            const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+
+            if (!detections) {
+              console.warn(`No face detected in ${file}`);
+              return null;
+            }
+            return new faceapi.LabeledFaceDescriptors(label, [detections.descriptor]);
+          })
+        );
+
+        // Filter out nulls (images where no face was found)
+        labeledFaceDescriptors = labeledFaceDescriptors.filter(d => d !== null);
+
+        msg.textContent = "Pronto! Reconhecendo…";
+        startRecognition();
+      } catch (err) {
+        console.error(err);
+        msg.textContent = "Erro ao carregar fotos: " + err;
+      }
+    }
+
+    function startRecognition() {
+      const canvas = faceapi.createCanvasFromMedia(video);
+      document.body.append(canvas);
+      const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
+      faceapi.matchDimensions(canvas, displaySize);
+
+      // Create FaceMatcher
+      let faceMatcher = null;
+      if (labeledFaceDescriptors.length > 0) {
+        faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+      }
+
+      setInterval(async () => {
+        const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+        const results = resizedDetections.map(d => {
+          if (faceMatcher) {
+            return faceMatcher.findBestMatch(d.descriptor);
+          } else {
+            return { label: 'Desconhecido', distance: 0 };
+          }
+        });
+
+        results.forEach((result, i) => {
+          const box = resizedDetections[i].detection.box;
+          // Mirror the X coordinate to match the mirrored video
+          const mirroredBox = {
+            x: displaySize.width - box.x - box.width,
+            y: box.y,
+            width: box.width,
+            height: box.height
+          };
+
+          const label = result.label === 'unknown' ? 'Desconhecido' : result.label;
+          const drawBox = new faceapi.draw.DrawBox(mirroredBox, { label: label });
+          drawBox.draw(canvas);
+        });
+
+        if (results.length > 0) {
+          const knownNames = results
+            .map(r => r.label)
+            .filter(l => l !== 'unknown' && l !== 'Desconhecido');
+
+          const uniqueNames = [...new Set(knownNames)]; // Remove duplicates
+
+          if (uniqueNames.length > 0) {
+            document.body.style.background = "#0a6";
+            msg.innerHTML = `Rostos identificados:<br>${uniqueNames.join('<br>')}`;
+          } else {
+            document.body.style.background = "#222";
+            msg.textContent = "Rosto(s) desconhecido(s)";
+          }
+        } else {
+          document.body.style.background = "#222";
+          msg.textContent = "Aguardando rosto…";
+        }
+
+      }, 100);
+    }
+
+    video.addEventListener('play', () => {
+      // Canvas creation moved to startRecognition to ensure labeled images are loaded first or handled
+    });
+  </script>
 </body>
+
 </html>
