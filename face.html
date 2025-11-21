@@ -62,7 +62,8 @@
   <script>
     const video = document.getElementById('video');
     const msg = document.getElementById('msg');
-    let labeledFaceDescriptors = [];
+    let faceMatcher = null; // Global faceMatcher
+    let isRecognitionRunning = false;
 
     // Load models and start camera
     Promise.all([
@@ -81,26 +82,40 @@
           video: { width: 640, height: 480, facingMode: "user" }
         });
         video.srcObject = stream;
+
+        // Initial load
         await loadLabeledImages();
+
+        // Refresh every 60 seconds
+        setInterval(() => {
+          console.log("Refreshing face data...");
+          loadLabeledImages(true); // Pass true to indicate background refresh
+        }, 60000);
+
       } catch (err) {
         console.error(err);
         msg.textContent = "Erro na câmera: " + err;
       }
     }
 
-    async function loadLabeledImages() {
-      msg.textContent = "Carregando fotos…";
+    async function loadLabeledImages(isBackgroundRefresh = false) {
+      if (!isBackgroundRefresh) {
+        msg.textContent = "Atualizando dados…";
+      } else {
+        const originalText = msg.innerHTML;
+      }
+
       try {
         const response = await fetch('faces.json');
         const imageFiles = await response.json();
 
         if (imageFiles.length === 0) {
-          msg.textContent = "Nenhuma foto encontrada em /labeled_images";
-          startRecognition(); // Start anyway, just won't recognize anyone
+          if (!isBackgroundRefresh) msg.textContent = "Nenhuma foto encontrada.";
+          if (!isRecognitionRunning) startRecognition();
           return;
         }
 
-        labeledFaceDescriptors = await Promise.all(
+        const labeledFaceDescriptors = await Promise.all(
           imageFiles.map(async file => {
             const label = file.split('.')[0]; // Remove extension
             const imgUrl = `labeled_images/${file}`;
@@ -115,28 +130,33 @@
           })
         );
 
-        // Filter out nulls (images where no face was found)
-        labeledFaceDescriptors = labeledFaceDescriptors.filter(d => d !== null);
+        // Filter out nulls
+        const validDescriptors = labeledFaceDescriptors.filter(d => d !== null);
 
-        msg.textContent = "Pronto! Reconhecendo…";
-        startRecognition();
+        if (validDescriptors.length > 0) {
+          faceMatcher = new faceapi.FaceMatcher(validDescriptors, 0.6);
+          console.log("Face matcher updated with " + validDescriptors.length + " faces.");
+        }
+
+        if (!isBackgroundRefresh) {
+          msg.textContent = "Pronto! Reconhecendo…";
+        }
+
+        if (!isRecognitionRunning) {
+          startRecognition();
+        }
       } catch (err) {
         console.error(err);
-        msg.textContent = "Erro ao carregar fotos: " + err;
+        if (!isBackgroundRefresh) msg.textContent = "Erro ao carregar fotos: " + err;
       }
     }
 
     function startRecognition() {
+      isRecognitionRunning = true;
       const canvas = faceapi.createCanvasFromMedia(video);
       document.body.append(canvas);
       const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
       faceapi.matchDimensions(canvas, displaySize);
-
-      // Create FaceMatcher
-      let faceMatcher = null;
-      if (labeledFaceDescriptors.length > 0) {
-        faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
-      }
 
       setInterval(async () => {
         const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
