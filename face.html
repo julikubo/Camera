@@ -66,9 +66,9 @@
 
     // Load models and start camera
     Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri('/proj/cam/models'),
-      faceapi.nets.faceLandmark68Net.loadFromUri('/proj/cam/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/proj/cam/models')
+      faceapi.nets.ssdMobilenetv1.loadFromUri('./models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('./models')
     ]).then(startCamera).catch(err => {
       console.error(err);
       msg.textContent = "Erro ao carregar modelos: " + err;
@@ -91,7 +91,7 @@
     async function loadLabeledImages() {
       msg.textContent = "Carregando fotos…";
       try {
-        const response = await fetch('list_faces.php');
+        const response = await fetch('faces.json');
         const imageFiles = await response.json();
 
         if (imageFiles.length === 0) {
