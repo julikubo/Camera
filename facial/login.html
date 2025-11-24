@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Facial - Vercel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        body.recognized {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        video {
+            width: 100%;
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #msg {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 12px;
+            font-size: 1.1em;
+            text-align: center;
+            z-index: 10;
+            backdrop-filter: blur(10px);
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .btn {
+            margin-top: 15px;
+            padding: 12px 30px;
+            background: #fff;
+            color: #667eea;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .success {
+            color: #38ef7d;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <video id="video" autoplay muted playsinline></video>
+        <div id="msg">
+            <div class="loading"></div> Carregando modelos…
+        </div>
+    </div>
+
+    <div id="status">
+        <h2>🔐 Login Facial</h2>
+        <p>Posicione seu rosto na câmera para fazer login</p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const msg = document.getElementById('msg');
+        const status = document.getElementById('status');
+        let faceMatcher = null;
+        let loginAttempted = false;
+
+        Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri('./models'),
+            faceapi.nets.faceLandmark68Net.loadFromUri('./models'),
+            faceapi.nets.faceRecognitionNet.loadFromUri('./models')
+        ]).then(startCamera).catch(err => {
+            msg.innerHTML = "❌ Erro ao carregar modelos: " + err;
+        });
+
+        async function startCamera() {
+            msg.innerHTML = "📷 Iniciando câmera…";
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: "user" }
+                });
+                video.srcObject = stream;
+                await loadLabeledImages();
+            } catch (err) {
+                msg.innerHTML = "❌ Erro na câmera: " + err;
+            }
+        }
+
+        async function loadLabeledImages() {
+            msg.innerHTML = "🔄 Carregando rostos cadastrados…";
+            try {
+                const response = await fetch('faces.json');
+                const imageFiles = await response.json();
+
+                const labeledFaceDescriptors = await Promise.all(
+                    imageFiles.map(async file => {
+                        const label = file.split('.')[0];
+                        const img = await faceapi.fetchImage(`labeled_images/${file}`);
+                        const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                        if (!detections) return null;
+                        return new faceapi.LabeledFaceDescriptors(label, [detections.descriptor]);
+                    })
+                );
+
+                const validDescriptors = labeledFaceDescriptors.filter(d => d !== null);
+                if (validDescriptors.length > 0) {
+                    faceMatcher = new faceapi.FaceMatcher(validDescriptors, 0.6);
+                }
+
+                msg.innerHTML = "✅ Pronto! Aguardando rosto…";
+                startRecognition();
+            } catch (err) {
+                msg.innerHTML = "❌ Erro ao carregar fotos: " + err;
+            }
+        }
+
+        function startRecognition() {
+            const canvas = faceapi.createCanvasFromMedia(video);
+            document.getElementById('container').append(canvas);
+            const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
+            faceapi.matchDimensions(canvas, displaySize);
+
+            setInterval(async () => {
+                const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+                canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+                const results = resizedDetections.map(d => {
+                    return faceMatcher ? faceMatcher.findBestMatch(d.descriptor) : { label: 'unknown', distance: 0 };
+                });
+
+                results.forEach((result, i) => {
+                    const box = resizedDetections[i].detection.box;
+                    const mirroredBox = {
+                        x: displaySize.width - box.x - box.width,
+                        y: box.y,
+                        width: box.width,
+                        height: box.height
+                    };
+                    const label = result.label === 'unknown' ? 'Desconhecido' : result.label;
+                    new faceapi.draw.DrawBox(mirroredBox, { label }).draw(canvas);
+                });
+
+                if (results.length > 0 && !loginAttempted) {
+                    const knownFaces = results.filter(r => r.label !== 'unknown');
+                    if (knownFaces.length > 0) {
+                        const faceName = knownFaces[0].label;
+                        msg.innerHTML = `👤 Rosto reconhecido: <strong>${faceName}</strong>`;
+                        document.body.classList.add('recognized');
+                        loginAttempted = true;
+                        attemptLogin(faceName);
+                    }
+                } else if (results.length === 0) {
+                    msg.innerHTML = "👀 Aguardando rosto…";
+                    document.body.classList.remove('recognized');
+                }
+            }, 100);
+        }
+
+        async function attemptLogin(faceName) {
+            status.innerHTML = `<div class="loading"></div> Fazendo login como ${faceName}...`;
+
+            try {
+                const response = await fetch('/api/facial-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ face_name: faceName })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    localStorage.setItem('session_token', data.session_token);
+                    msg.innerHTML = `✅ Login realizado!`;
+                    status.innerHTML = `
+                        <div class="success">✅ Bem-vindo, ${data.user.name}!</div>
+                        <p>Email: ${data.user.email}</p>
+                        <p>Redirecionando...</p>
+                    `;
+                    setTimeout(() => window.location.href = 'dashboard.html', 2000);
+                } else {
+                    msg.innerHTML = `❌ Falha no login`;
+                    status.innerHTML = `
+                        <p style="color: #ff6b6b;">❌ ${data.message}</p>
+                        <button class="btn" onclick="location.reload()">Tentar Novamente</button>
+                    `;
+                    loginAttempted = false;
+                }
+            } catch (err) {
+                msg.innerHTML = `❌ Erro no servidor`;
+                status.innerHTML = `
+                    <p style="color: #ff6b6b;">❌ Erro ao conectar: ${err.message}</p>
+                    <button class="btn" onclick="location.reload()">Tentar Novamente</button>
+                `;
+                loginAttempted = false;
+            }
+        }
+    </script>
+</body>
+
+</html>

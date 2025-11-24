@@ -1,0 +1,23 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "api/**/*.js",
+            "use": "@vercel/node"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/api/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/$1"
+        }
+    ],
+    "env": {
+        "SUPABASE_URL": "https://nljeheupokqsvsuudlvt.supabase.co",
+        "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5samVoZXVwb2txc3ZzdXVkbHZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyMTMyODUsImV4cCI6MjA3NTc4OTI4NX0._SlcHYKtEbmDosDCVHNtLySgtlglnMnODBQH5O1QE70"
+    }
+}

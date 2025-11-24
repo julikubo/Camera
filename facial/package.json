@@ -1,0 +1,16 @@
+{
+    "name": "facial-login-vercel",
+    "version": "1.0.0",
+    "description": "Facial Recognition Login System for Vercel",
+    "main": "index.html",
+    "scripts": {
+        "dev": "vercel dev",
+        "deploy": "vercel --prod"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0"
+    },
+    "devDependencies": {
+        "vercel": "^33.0.0"
+    }
+}

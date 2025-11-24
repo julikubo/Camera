@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Facial Login</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .user-details h2 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .user-details p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .logout-btn {
+            padding: 12px 25px;
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: #ff5252;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            color: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .card-content {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .face-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: white;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div id="loading" class="loading">
+            <i class="fas fa-spinner fa-spin"></i> Carregando...
+        </div>
+
+        <div id="content" style="display: none;">
+            <div class="header">
+                <div class="user-info">
+                    <div class="avatar" id="avatar"><i class="fas fa-user"></i></div>
+                    <div class="user-details">
+                        <h2 id="userName">Usuário</h2>
+                        <p id="userEmail">email@example.com</p>
+                        <span class="face-badge">
+                            <i class="fas fa-face-smile"></i> Reconhecido por Face
+                        </span>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> Sair
+                </button>
+            </div>
+
+            <div class="cards">
+                <div class="card">
+                    <h3>
+                        <div class="card-icon"><i class="fas fa-user-circle"></i></div>
+                        Minha Conta
+                    </h3>
+                    <div class="card-content">
+                        <p><strong>ID:</strong> <span id="userId">-</span></p>
+                        <p><strong>Nome:</strong> <span id="userNameCard">-</span></p>
+                        <p><strong>Email:</strong> <span id="userEmailCard">-</span></p>
+                        <p><strong>Face:</strong> <span id="faceNameCard">-</span></p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>
+                        <div class="card-icon"><i class="fas fa-camera"></i></div>
+                        Sistema
+                    </h3>
+                    <div class="card-content">
+                        <p>✅ Reconhecimento Facial Ativo</p>
+                        <p>✅ Conectado ao Supabase</p>
+                        <p>✅ Sessão Segura</p>
+                        <p>✅ Deploy no Vercel</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function checkLogin() {
+            try {
+                const token = localStorage.getItem('session_token');
+                if (!token) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                const response = await fetch('/api/check-session', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                const data = await response.json();
+
+                if (!data.logged_in) {
+                    localStorage.removeItem('session_token');
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                document.getElementById('userName').textContent = data.user.name;
+                document.getElementById('userEmail').textContent = data.user.email;
+                document.getElementById('userId').textContent = data.user.id;
+                document.getElementById('userNameCard').textContent = data.user.name;
+                document.getElementById('userEmailCard').textContent = data.user.email;
+                document.getElementById('faceNameCard').textContent = data.user.face_name || 'N/A';
+
+                const initial = data.user.name.charAt(0).toUpperCase();
+                document.getElementById('avatar').textContent = initial;
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+
+            } catch (err) {
+                console.error(err);
+                alert('Erro ao verificar login');
+                window.location.href = 'login.html';
+            }
+        }
+
+        async function logout() {
+            if (!confirm('Deseja realmente sair?')) return;
+
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                localStorage.removeItem('session_token');
+                window.location.href = 'login.html';
+            } catch (err) {
+                console.error(err);
+                localStorage.removeItem('session_token');
+                window.location.href = 'login.html';
+            }
+        }
+
+        checkLogin();
+    </script>
+</body>
+
+</html>
