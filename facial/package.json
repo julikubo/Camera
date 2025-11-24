@@ -1,6 +1,7 @@
 {
     "name": "facial-login-vercel",
     "version": "1.0.0",
+    "type": "module",
     "description": "Facial Recognition Login System for Vercel",
     "main": "index.html",
     "scripts": {

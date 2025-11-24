@@ -1,5 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
-import { FACE_USER_MAPPING } from '../face-mapping.js';
+
+// Face-to-User Mapping
+// Maps recognized face names to Supabase user emails
+const FACE_USER_MAPPING = {
+    'Juliano Kubo': 'juliano@example.com',  // Change to actual email in TimeSupa
+    // Add more mappings as needed
+    // 'Face Name': 'user@email.com',
+};
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
